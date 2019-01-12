@@ -126,7 +126,7 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 	if ENABLE_MEMCACHE {
 		rs_client := redis.NewClient(&redis.Options{
 			Addr:     REDIS_URL,
-			Password: "", // no password set
+			Password: "960908",
 			DB:       0,  // use default DB
 		})
 
@@ -198,7 +198,7 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 	if ENABLE_MEMCACHE {
 		rs_client := redis.NewClient(&redis.Options{
 			Addr:     REDIS_URL,
-			Password: "", // no password set
+			Password: "960908",
 			DB:       0,  // use default DB
 		})
 
