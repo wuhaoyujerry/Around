@@ -2,18 +2,23 @@ package main
 
 import (
 	"cloud.google.com/go/bigtable"
-	"context"
 	"cloud.google.com/go/storage"
+	"context"
 	"encoding/json"
 	"fmt"
-	elastic "gopkg.in/olivere/elastic.v3"
+	"github.com/auth0/go-jwt-middleware"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/go-redis/redis"
+	"github.com/gorilla/mux"
+	"github.com/pborman/uuid"
+	"gopkg.in/olivere/elastic.v3"
 	"io"
 	"log"
 	"net/http"
 	"reflect"
 	"strconv"
-	"github.com/pborman/uuid"
 	"strings"
+	"time"
 )
 
 const (
@@ -23,8 +28,11 @@ const (
 	PROJECT_ID = "around-227916"
 	BT_INSTANCE = "around-post"
 	// Needs to update this URL if you deploy it to cloud.
-	ES_URL = "http: //34.73.241.57:9200"
+	ES_URL = "http://34.73.216.15:9200"
 	BUCKET_NAME = "post-images-227916"
+	ENABLE_MEMCACHE = true
+	ENABLE_BIGTABLE = false
+	REDIS_URL       = "redis-17523.c1.us-central1-2.gce.cloud.redislabs.com:17523"
 )
 
 type Location struct {
@@ -39,6 +47,8 @@ type Post struct {
 	Location Location `json:"location"`
 	Url    string `json:"url"`
 }
+
+var mySigningKey = []byte("secret")
 
 func main() {
 	// Create a client
@@ -75,28 +85,66 @@ func main() {
 	}
 
 	fmt.Println("started-service")
-	http.HandleFunc("/post", handlerPost)
-	http.HandleFunc("/search", handlerSearch)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Here we are instantiating the gorilla/mux router
+	r := mux.NewRouter()
 
+	var jwtMiddleware = jwtmiddleware.New(jwtmiddleware.Options{
+		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
+			return mySigningKey, nil
+		},
+		SigningMethod: jwt.SigningMethodHS256,
+	})
+
+	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost))).Methods("POST")
+	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch))).Methods("GET")
+	r.Handle("/login", http.HandlerFunc(loginHandler)).Methods("POST")
+	r.Handle("/signup", http.HandlerFunc(signupHandler)).Methods("POST")
+
+	http.Handle("/", r)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func handlerSearch(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Received one post request")
+	fmt.Println("Received one request for search")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
+
+	if r.Method != "GET" {
+		return
+	}
+
 	lat, _ := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
 	lon, _ := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
-
+	// range is optional
 	ran := DISTANCE
 	if val := r.URL.Query().Get("range"); val != "" {
 		ran = val + "km"
 	}
 
-	// fmt.Printf("Search received: %f %f %s\n", lat, lon, ran)
+	key := r.URL.Query().Get("lat") + ":" + r.URL.Query().Get("lon") + ":" + ran
+	if ENABLE_MEMCACHE {
+		rs_client := redis.NewClient(&redis.Options{
+			Addr:     REDIS_URL,
+			Password: "960908", // no password set
+			DB:       0,  // use default DB
+		})
+
+		val, err := rs_client.Get(key).Result()
+		if err != nil {
+			fmt.Printf("Redis cannot find the key %s as %v.\n", key, err)
+		} else {
+			fmt.Printf("Redis find the key %s.\n", key)
+			w.Write([]byte(val))
+			return
+		}
+	}
 
 	// Create a client
 	client, err := elastic.NewClient(elastic.SetURL(ES_URL), elastic.SetSniff(false))
 	if err != nil {
-		panic(err)
+		http.Error(w, "ES is not setup", http.StatusInternalServerError)
+		fmt.Printf("ES is not setup %v\n", err)
 		return
 	}
 
@@ -113,7 +161,9 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 		Do()
 	if err != nil {
 		// Handle error
-		panic(err)
+		m := fmt.Sprintf("Failed to search ES %v", err)
+		fmt.Println(m)
+		http.Error(w, m, http.StatusInternalServerError)
 	}
 
 	// searchResult is of type SearchResult and returns hits, suggestions,
@@ -127,9 +177,10 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 	// However, it ignores errors in serialization.
 	var typ Post
 	var ps []Post
-	for _, item := range searchResult.Each(reflect.TypeOf(typ)) { // instance of
-		p := item.(Post) // p = (Post) item
+	for _, item := range searchResult.Each(reflect.TypeOf(typ)) {
+		p := item.(Post)
 		fmt.Printf("Post by %s: %s at lat %v and lon %v\n", p.User, p.Message, p.Location.Lat, p.Location.Lon)
+		// Perform filtering based on keywords such as web spam etc.
 		if !containsFilteredWords(&p.Message) {
 			ps = append(ps, p)
 		}
@@ -138,12 +189,27 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	js, err := json.Marshal(ps)
 	if err != nil {
-		panic(err)
+		m := fmt.Sprintf("Failed to parse post object %v", err)
+		fmt.Println(m)
+		http.Error(w, m, http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if ENABLE_MEMCACHE {
+		rs_client := redis.NewClient(&redis.Options{
+			Addr:     REDIS_URL,
+			Password: "960908", // no password set
+			DB:       0,  // use default DB
+		})
+
+		// Set the cache expiration to be 10 seconds
+		err := rs_client.Set(key, string(js), time.Second*10).Err()
+		if err != nil {
+			fmt.Printf("Redis cannot save the key %s as %v.\n", key, err)
+		}
+
+	}
+
 	w.Write(js)
 
 }
@@ -153,6 +219,9 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
 
+	user := r.Context().Value("user")
+	claims := user.(*jwt.Token).Claims
+	username := claims.(jwt.MapClaims)["username"]
 
 	// 32 << 20 is the maxMemory param for ParseMultipartForm, equals to 32MB (1MB = 1024 * 1024 bytes = 2^20 bytes)
 	// After you call ParseMultipartForm, the file will be saved in the server memory with maxMemory size.
@@ -164,7 +233,7 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 	lat, _ := strconv.ParseFloat(r.FormValue("lat"), 64)
 	lon, _ := strconv.ParseFloat(r.FormValue("lon"), 64)
 	p := &Post{
-		User:    "1111",
+		User:    username.(string),
 		Message: r.FormValue("message"),
 		Location: Location {
 			Lat: lat,
@@ -196,10 +265,12 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 	p.Url = attrs.MediaLink
 
 	// Save to ES.
-	saveToES(p, id)
+	go saveToES(p, id)
 
 	// Save to BigTable.
-	// saveToBigTable(p, id)
+	if ENABLE_BIGTABLE {
+		go saveToBigTable(p, id)
+	}
 
 }
 
