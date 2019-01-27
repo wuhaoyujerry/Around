@@ -95,10 +95,10 @@ func main() {
 		SigningMethod: jwt.SigningMethodHS256,
 	})
 
-	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost))).Methods("POST", "OPTIONS")
-	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch))).Methods("GET", "OPTIONS")
-	r.Handle("/login", http.HandlerFunc(loginHandler)).Methods("POST", "OPTIONS")
-	r.Handle("/signup", http.HandlerFunc(signupHandler)).Methods("POST", "OPTIONS")
+	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost)))
+	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch)))
+	r.Handle("/login", http.HandlerFunc(loginHandler))
+	r.Handle("/signup", http.HandlerFunc(signupHandler))
 
 	http.Handle("/", r)
 	log.Fatal(http.ListenAndServe(":8080", nil))
