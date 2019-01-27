@@ -124,8 +124,6 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // If login is successful, a new token is created.
-
-// If login is successful, a new token is created.
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Received one login request")
 
