@@ -184,8 +184,6 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 		if !containsFilteredWords(&p.Message) {
 			ps = append(ps, p)
 		}
-		ps = append(ps, p)
-
 	}
 	js, err := json.Marshal(ps)
 	if err != nil {
