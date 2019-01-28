@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"github.com/rs/cors"
 )
 
 const (
@@ -101,7 +102,8 @@ func main() {
 	r.Handle("/signup", http.HandlerFunc(signupHandler))
 
 	http.Handle("/", r)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	handler := cors.Default().Handler(r)
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }
 
 func handlerSearch(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +218,10 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "X-Requested-With, Content-Type,Authorization")
+
+	if r.Method != "POST" {
+		return
+	}
 
 	if r.Method != "POST" {
 		return
