@@ -9,6 +9,7 @@ import (
 	"github.com/auth0/go-jwt-middleware"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/go-redis/redis"
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/pborman/uuid"
 	"gopkg.in/olivere/elastic.v3"
@@ -95,13 +96,16 @@ func main() {
 		SigningMethod: jwt.SigningMethodHS256,
 	})
 
-	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost)))
-	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch)))
-	r.Handle("/login", http.HandlerFunc(loginHandler))
-	r.Handle("/signup", http.HandlerFunc(signupHandler))
+	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost))).Methods("POST")
+	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch))).Methods("GET")
+	r.Handle("/login", http.HandlerFunc(loginHandler)).Methods("POST")
+	r.Handle("/signup", http.HandlerFunc(signupHandler)).Methods("POST")
 
 	http.Handle("/", r)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	headersOk := handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type", "Authorization"})
+	originsOk := handlers.AllowedOrigins([]string{"*"})
+	methodsOk := handlers.AllowedMethods([]string{"GET", "HEAD", "POST", "PUT", "OPTIONS"})
+	log.Fatal(http.ListenAndServe(":8080", handlers.CORS(originsOk, headersOk, methodsOk)(r)))
 }
 
 func handlerSearch(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +220,10 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "X-Requested-With, Content-Type,Authorization")
+
+	if r.Method != "POST" {
+		return
+	}
 
 	if r.Method != "POST" {
 		return
