@@ -30,7 +30,7 @@ const (
 	// Needs to update this URL if you deploy it to cloud.
 	ES_URL = "http://35.231.42.15:9200"
 	BUCKET_NAME = "post-images-227916"
-	ENABLE_MEMCACHE = true
+	ENABLE_MEMCACHE = false
 	ENABLE_BIGTABLE = false
 	REDIS_URL       = "redis-17523.c1.us-central1-2.gce.cloud.redislabs.com:17523"
 )
@@ -108,7 +108,7 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Received one request for search")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
+	w.Header().Set("Access-Control-Allow-Headers", "X-Requested-With, Content-Type,Authorization")
 
 	if r.Method != "GET" {
 		return
@@ -215,9 +215,19 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 func handlerPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
+	w.Header().Set("Access-Control-Allow-Headers", "X-Requested-With, Content-Type,Authorization")
+
+	if r.Method != "POST" {
+		return
+	}
 
 	user := r.Context().Value("user")
+	if user == nil {
+		m := fmt.Sprintf("Unable to find user in context")
+		fmt.Println(m)
+		http.Error(w, m, http.StatusBadRequest)
+		return
+	}
 	claims := user.(*jwt.Token).Claims
 	username := claims.(jwt.MapClaims)["username"]
 
