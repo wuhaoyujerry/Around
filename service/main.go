@@ -29,7 +29,7 @@ const (
 	PROJECT_ID = "around-227916"
 	BT_INSTANCE = "around-post"
 	// Needs to update this URL if you deploy it to cloud.
-	ES_URL = "http://34.73.92.65:9200"
+	ES_URL = "http://35.227.80.241:9200"
 	BUCKET_NAME = "post-images-227916"
 	ENABLE_MEMCACHE = false
 	ENABLE_BIGTABLE = false
@@ -157,12 +157,14 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 	q := elastic.NewGeoDistanceQuery("location")
 	q = q.Distance(ran).Lat(lat).Lon(lon)
 
+	fmt.Println(q)
 	// Some delay may range from seconds to minutes. So if you don't get enough results. Try it later.
 	searchResult, err := client.Search().
 		Index(INDEX).
 		Query(q).
 		Pretty(true).
 		Do()
+
 	if err != nil {
 		// Handle error
 		m := fmt.Sprintf("Failed to search ES %v", err)
